@@ -122,7 +122,8 @@ class DefaultRegressionRunner(RegressionRunner):
                     return
 
                 regression._running.add(test.id)
-                await test.start()
+                runner = getattr(self, "test_runner", default_test_runner)
+                await test.start(runner=runner)
                 await regression.done.put(test)
             finally:
                 if test is not None:
