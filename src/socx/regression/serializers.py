@@ -256,14 +256,23 @@ class YamlRegressionSerializer(RegressionSerializer):
         test.result = _coerce_result(data.get("result", TestResult.NA))
 
         if isinstance(test, Test):
+            root_output_dir_resolved = root_output_dir.resolve()
             for attr, relpath in (
                 ("stdout", stdout_relpath),
                 ("stderr", stderr_relpath),
             ):
                 if relpath:
-                    file = root_output_dir / str(relpath)
-                    if file.exists():
-                        setattr(test, attr, file.read_text(encoding="utf-8"))
+                    candidate = (root_output_dir / str(relpath)).resolve()
+                    try:
+                        candidate.relative_to(root_output_dir_resolved)
+                    except ValueError:
+                        continue
+                    if candidate.exists():
+                        setattr(
+                            test,
+                            attr,
+                            candidate.read_text(encoding="utf-8"),
+                        )
 
         return test
 
