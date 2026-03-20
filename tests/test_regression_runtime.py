@@ -145,3 +145,16 @@ def test_regression_state_round_trips_with_test_outputs(tmp_path) -> None:
         assert loaded_test.stderr_path.read_text() == "alpha err"
 
     asyncio.run(run_test())
+
+
+def test_soft_reset_preserves_passed_tests() -> None:
+    test = Test(name="alpha", exec="echo ok")
+    test.status = TestStatus.Finished
+    test.result = TestResult.Passed
+    test.started_time = 1.0
+
+    test.soft_reset()
+
+    assert test.status is TestStatus.Finished
+    assert test.result is TestResult.Passed
+    assert test.started_time == 1.0

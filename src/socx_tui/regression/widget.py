@@ -18,7 +18,7 @@ from textual.widgets import Button, Tree
 from textual_fspicker import FileOpen
 
 from socx_tui.regression.details import RegressionDetails
-from socx_tui.regression.dialog import TestOutputDialog
+from socx_tui.regression.dialog import RestartSelectionDialog, TestOutputDialog
 from socx_tui.regression.tree import VimTree
 
 
@@ -48,7 +48,7 @@ class RegressionWidget(Widget, can_focus=False, inherit_bindings=True):
         Binding("x", "pause_selected()", "Pause", show=False),
         Binding("P", "stop_selected()", "Stop", show=False),
         Binding("X", "stop_selected()", "Stop", show=False),
-        Binding("R", "restart_selected()", "Restart", show=False),
+        Binding("R", "prompt_restart_selected()", "Restart", show=False),
     ]
     ALLOW_MAXIMIZE: ClassVar[bool] = True
 
@@ -161,7 +161,21 @@ class RegressionWidget(Widget, can_focus=False, inherit_bindings=True):
         if model is None:
             self._no_model_selected_notification()
             return
-        self._restart_model(model)
+        self._restart_model(model, "all")
+
+    async def action_prompt_restart_selected(self) -> None:
+        model = self.selected_model
+        if model is None:
+            self._no_model_selected_notification()
+            return
+        if not isinstance(model, Regression):
+            self._restart_model(model, "all")
+            return
+
+        self.app.push_screen(
+            RestartSelectionDialog(),
+            callback=lambda scope: self._on_restart_scope_selected(model, scope),
+        )
 
     @on(VimTree.OpenCursorNode)
     async def on_vim_tree_open_cursor_node(
@@ -185,7 +199,15 @@ class RegressionWidget(Widget, can_focus=False, inherit_bindings=True):
             case "resume-button":
                 self.app.call_next(self.action_resume_selected)
             case "restart-button":
-                self.app.call_next(self.action_restart_selected)
+                self.app.call_next(self.action_prompt_restart_selected)
+
+
+    def _on_restart_scope_selected(
+        self, model: Regression, scope: str | None
+    ) -> None:
+        if scope is None:
+            return
+        self._restart_model(model, scope)
 
     @work(exclusive=False)
     async def load_regression_from_file(self) -> None:
@@ -223,6 +245,30 @@ class RegressionWidget(Widget, can_focus=False, inherit_bindings=True):
     async def _restart_model(self, model: TestBase) -> None:
         await model.restart()
         self._refresh_tree_state()
+
+
+    async def _restart_regression_by_scope(
+        self, regression: Regression, scope: str
+    ) -> None:
+        if scope == "all":
+            await regression.restart()
+            return
+
+        if scope == "failed_or_cancelled":
+            selector = lambda t: t.failed or t.terminated
+        elif scope == "cancelled":
+            selector = lambda t: t.terminated
+        elif scope == "failed":
+            selector = lambda t: t.finished and t.result is TestResult.Failed
+        else:
+            selector = lambda t: False
+
+        for test in regression.iter_leaf_tests():
+            if selector(test):
+                test.soft_reset()
+
+        regression.soft_reset()
+        await regression.start()
 
     async def load_regression_from_path(self, path: Path) -> Regression:
         """Load regressions or saved state from ``path`` into the tree."""

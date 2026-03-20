@@ -9,6 +9,7 @@ from textual.binding import Binding, BindingType
 from textual.containers import Vertical
 from textual.screen import ModalScreen, ScreenResultType
 from textual.widgets import Static, TextArea
+from textual.widgets import Button
 
 from socx_tui.regression.bindings.vim.mode import VimModes
 
@@ -104,3 +105,52 @@ class TestOutputDialog(ModalScreen[ScreenResultType]):
                 stderr,
             ]
         )
+
+
+class RestartSelectionDialog(ModalScreen[str | None]):
+    """Modal dialog that asks which tests should be restarted."""
+
+    DEFAULT_CSS: ClassVar[str] = """
+    RestartSelectionDialog {
+        align: center middle;
+    }
+
+    #restart-selection-dialog {
+        width: 72;
+        height: auto;
+        border: thick $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #restart-selection-actions {
+        height: auto;
+        layout: vertical;
+    }
+    """
+
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("escape", "dismiss(None)", show=False),
+        Binding("q", "dismiss(None)", show=False),
+    ]
+
+    def compose(self) -> ComposeResult:
+        with Dialog(id="restart-selection-dialog"):
+            yield Static("Restart scope", id="restart-selection-title")
+            with Vertical(id="restart-selection-actions"):
+                yield Button("All tests", id="restart-scope-all")
+                yield Button(
+                    "Failing + cancelled", id="restart-scope-failed-cancelled"
+                )
+                yield Button("Only cancelled", id="restart-scope-cancelled")
+                yield Button("Only failing", id="restart-scope-failed")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        button_id = event.button.id
+        mapping = {
+            "restart-scope-all": "all",
+            "restart-scope-failed-cancelled": "failed_or_cancelled",
+            "restart-scope-cancelled": "cancelled",
+            "restart-scope-failed": "failed",
+        }
+        self.dismiss(mapping.get(button_id))
