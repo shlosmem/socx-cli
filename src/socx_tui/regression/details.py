@@ -1,4 +1,6 @@
 from __future__ import annotations
+from socx_tui.regression.bindings import VimModes
+from textual.containers import ScrollableContainer
 
 from datetime import datetime
 from typing import ClassVar
@@ -11,13 +13,26 @@ from textual.widgets import Static
 from socx import Test, Regression, TestBase, TestResult, TestStatus, Script
 
 
-class RegressionDetails(Static):
-    DEFAULT_CSS: ClassVar[str] = """
-    RegressionDetails {
-        content-align: center middle;
-    }
-    """
+class RegressionDetails(
+    ScrollableContainer, can_focus=True, inherit_bindings=True
+):
+    BINDINGS = ScrollableContainer.BINDINGS + VimModes.Normal
+    ALLOW_MAXIMIZE: ClassVar[bool] = True
 
+    model: reactive[TestBase | None] = reactive(None)
+
+    @property
+    def details(self) -> RegressionStaticDetails:
+        return self.query_exactly_one(RegressionStaticDetails)
+
+    def compose(self):
+        yield RegressionStaticDetails(id="regression-static-details")
+
+    def watch_model(self, model: TestBase) -> None:
+        self.details.model = model
+
+
+class RegressionStaticDetails(Static):
     model: reactive[TestBase | None] = reactive(None)
 
     def render(self) -> RenderResult:
@@ -34,23 +49,29 @@ class RegressionDetails(Static):
         if model is None:
             return Markdown(
                 dedent("""
-            **No regression selected.**
+                    **No regression selected.**
 
-            > **Tip**:
-            > Use `o` or `ctrl-o` to select a file to load regressions from.
-            > Supported file formats are: `.yaml`, `.yml`, `.toml`, `.json`
-            >
-            > Example:
-            >
-            > ```yaml
-            > ---
-            > my_regression:
-            >   - name: my_test
-            >     exec: |
-            >       #!/bin/bash
-            >       /my/custom/run_script arg1 arg2
-            > ```
-            """)
+                    Use `o` or `ctrl-o` to select a file to load regressions
+                    from.
+
+                    Supported file formats are: `.yaml`, `.yml`, `.toml`,
+                    and `.json`.
+
+                    Regression file example:
+
+                    ```yaml
+                    my_regression:
+                      - name: foo_test
+                        exec: |
+                          #!/bin/bash
+                          /my/custom/run_script --test foo_test
+
+                      - name: bar_test
+                        exec: |
+                          #!/bin/bash
+                          /my/custom/run_script --test bar_test
+                    ```
+                """)
             )
 
         if isinstance(model, Regression):

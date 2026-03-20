@@ -8,8 +8,10 @@ import logging
 
 import anyio
 
+from socx.core import Runner
 from socx.config import settings
-from socx.regression.test import TestBase, Test, TestResult, TestStatus
+from socx.regression.test import Test, TestResult, TestStatus
+from socx.regression.regression import Regression
 
 
 logger = logging.getLogger(__name__)
@@ -17,119 +19,116 @@ logger = logging.getLogger(__name__)
 semaphore = anyio.Semaphore(max(1, settings.regression.max_runs_in_parallel))
 
 
-class TestRunner:
+class TestRunner(Runner[Test]):
     """Interface for executing a single test node."""
 
-    async def run(self, test: TestBase) -> None:
+    async def run(self, task: Test) -> None:
         raise NotImplementedError
 
 
-class RegressionRunner:
+class RegressionRunner(Runner[Regression]):
     """Interface for executing a regression node."""
 
-    async def run(self, regression) -> None:
+    async def run(self, task: Regression) -> None:
         raise NotImplementedError
 
 
 class DefaultTestRunner(TestRunner):
     """Subprocess-backed implementation for executing ``Test`` models."""
 
-    async def run(self, test: TestBase) -> None:
-        if not isinstance(test, Test):
-            msg = f"Unsupported test type: {type(test).__name__}"
+    async def run(self, task: Test) -> None:
+        if not isinstance(task, Test):
+            msg = f"Unsupported task type: {type(task).__name__}"
             raise TypeError(msg)
 
-        if test.is_running():
+        if task.is_running():
             return
 
-        if test.is_suspended():
-            await test.resume()
+        if task.is_suspended():
+            await task.resume()
             return
 
-        test._termination_requested = False
-        test.result = TestResult.NA
-        test.stdout = ""
-        test.stderr = ""
-        test.started_time = time.time()
-        test.finished_time = None
-        test.status = TestStatus.Pending
-        test._prepare_output_files()
+        task._termination_requested = False
+        task.result = TestResult.NA
+        task.stdout = ""
+        task.stderr = ""
+        task.started_time = time.time()
+        task.finished_time = None
+        task.status = TestStatus.Pending
+        task._prepare_output_files()
 
-        if not test.exec:
-            test.status = TestStatus.Terminated
-            test.result = TestResult.Failed
-            test.finished_time = time.time()
-            test._write_output_files()
+        if not task.exec:
+            task.status = TestStatus.Terminated
+            task.result = TestResult.Failed
+            task.finished_time = time.time()
+            task._write_output_files()
             return
 
-        process = await aio.create_subprocess_exec(
-            "/bin/sh",
-            "-c",
-            str(test.exec),
+        process = await aio.create_subprocess_shell(
+            str(task.exec),
             stdout=aio.subprocess.PIPE,
             stderr=aio.subprocess.PIPE,
             start_new_session=True,
         )
-        test._process = process
-        test.status = TestStatus.Running
+        task._process = process
+        task.status = TestStatus.Running
 
         stdout, stderr = None, None
 
         try:
             stdout, stderr = await process.communicate()
         finally:
-            test.finished_time = time.time()
-            test.stderr = stderr.decode() if stderr else ""
-            test.stdout = stdout.decode() if stdout else ""
-            test._write_output_files()
+            task.finished_time = time.time()
+            task.stderr = stderr.decode() if stderr else ""
+            task.stdout = stdout.decode() if stdout else ""
+            task._write_output_files()
             returncode = process.returncode or 0
 
-            if test._termination_requested or returncode < 0:
-                test.status = TestStatus.Terminated
-                test.result = TestResult.Failed
+            if task._termination_requested or returncode < 0:
+                task.status = TestStatus.Terminated
+                task.result = TestResult.Failed
             elif returncode == 0:
-                test.status = TestStatus.Finished
-                test.result = TestResult.Passed
+                task.status = TestStatus.Finished
+                task.result = TestResult.Passed
             else:
-                test.status = TestStatus.Finished
-                test.result = TestResult.Failed
+                task.status = TestStatus.Finished
+                task.result = TestResult.Failed
 
-            test._process = None
+            task._process = None
 
 
 class DefaultRegressionRunner(RegressionRunner):
     """Default concurrent runner implementation for regressions."""
 
-    async def run(self, regression) -> None:
-        logger.info("regression starting...")
-        await regression._queue_tests()
+    async def run(self, task: Regression) -> None:
+        logger.info("task starting...")
         async with anyio.create_task_group() as tg:
-            for _ in range(regression.run_limit):
-                tg.start_soon(self._worker, regression)
+            tg.start_soon(task._queue_tests)
+            for _ in range(task.run_limit):
+                tg.start_soon(self._worker, task)
 
-    async def _worker(self, regression) -> None:
-        while True:
-            await semaphore.acquire()
-            test = await regression.pending.get()
-            try:
-                if test is None:
-                    return
+    async def _worker(self, task: Regression) -> None:
+        async with semaphore:
+            while True:
+                test = await task.pending.get()
+                try:
+                    if test is None:
+                        return
 
-                while not regression._pause_event.is_set():
-                    await aio.sleep(0.05)
+                    if not task._pause_event.is_set():
+                        await anyio.sleep(0.05)
 
-                if regression._stop_requested:
-                    return
+                    if task._stop_requested:
+                        return
 
-                regression._running.add(test.id)
-                runner = getattr(self, "test_runner", default_test_runner)
-                await test.start(runner=runner)
-                await regression.done.put(test)
-            finally:
-                if test is not None:
-                    regression._running.discard(test.id)
-                regression.pending.task_done()
-                semaphore.release()
+                    task._running.add(test.id)
+                    runner = getattr(self, "test_runner", default_test_runner)
+                    await test.start(runner=runner)
+                    await task.done.put(test)
+                finally:
+                    if test is not None:
+                        task._running.discard(test.id)
+                    task.pending.task_done()
 
 
 default_test_runner = DefaultTestRunner()

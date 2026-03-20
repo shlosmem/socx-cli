@@ -1,14 +1,15 @@
 """Asynchronous regression runner that orchestrates test execution."""
 
 from __future__ import annotations
-import anyio.from_thread
 
 import asyncio as aio
+import anyio
+import anyio.from_thread
 from pathlib import Path
-from typing import Self, Any, Literal
+from typing import Self, Any, Literal, cast
 from threading import RLock
 from functools import partial
-from collections import OrderedDict
+from collections import OrderedDict, ChainMap
 from collections.abc import AsyncGenerator, Iterable
 
 from pydantic import (
@@ -18,13 +19,12 @@ from pydantic import (
     Field,
     PrivateAttr,
     computed_field,
-    validate_call,
 )
 
+from socx.core import Manager, Runner, FilePath
 from socx.config import settings
 from socx.regression.test import Test, TestBase, TestResult, TestStatus
-from socx.regression.manager import default_regression_manager
-from socx.regression.serializers import _safe_dir_name
+from socx.regression._utils import _safe_dir_name
 
 
 class Regression(TestBase):
@@ -65,61 +65,69 @@ class Regression(TestBase):
         self.test_map = OrderedDict({test.id: test for test in tests})
 
     @classmethod
-    @validate_call()
     def from_file(
         cls,
-        path: str | Path,
+        path: FilePath,
         name: str | None = None,
         test_cls: type[TestBase] | None = None,
+        manager: Manager[Self] | None = None,
         **kwargs: Any,
     ) -> Self:
-        return default_regression_manager.from_file(
-            cls, path, name=name, test_cls=test_cls, **kwargs
-        )
+        kwargs = dict(ChainMap(kwargs, dict(name=name, test_cls=test_cls)))
+        if manager is None:
+            from socx.regression.manager import default_regression_manager
+
+            manager = cast(Manager[Self], default_regression_manager)
+        return manager.from_file(cls, path, **kwargs)
 
     @classmethod
-    @validate_call()
     def load(
         cls,
-        path: str | Path,
+        path: FilePath,
         name: str | None = None,
         test_cls: type[Test] | None = None,
+        manager: Manager[Self] | None = None,
         **kwargs: Any,
     ) -> Self:
-        return default_regression_manager.load(
-            cls, path, name=name, test_cls=test_cls, **kwargs
-        )
+        kwargs = dict(ChainMap(kwargs, dict(name=name, test_cls=test_cls)))
+        if manager is None:
+            from socx.regression.manager import default_regression_manager
+
+            manager = cast(Manager[Self], default_regression_manager)
+        return manager.load(cls, path, **kwargs)
 
     @computed_field
     @property
     def result(self) -> TestResult:
-        if not len(self):
+        with self.lock:
+            if not len(self):
+                return TestResult.NA
+            results = [test.result for test in self.tests]
+            if all(result is TestResult.Passed for result in results):
+                return TestResult.Passed
+            if any(result is TestResult.Failed for result in results):
+                return TestResult.Failed
             return TestResult.NA
-        results = [test.result for test in self.tests]
-        if all(result is TestResult.Passed for result in results):
-            return TestResult.Passed
-        if any(result is TestResult.Failed for result in results):
-            return TestResult.Failed
-        return TestResult.NA
 
     @computed_field
     @property
     def status(self) -> TestStatus:
-        if not len(self):
-            return TestStatus.Idle
-        terminated_statuses = {TestStatus.Finished, TestStatus.Terminated}
-        statuses = [test.status for test in self.tests]
-        if all(status is TestStatus.Finished for status in statuses):
-            return TestStatus.Finished
-        if all(status in terminated_statuses for status in statuses):
-            return TestStatus.Terminated
-        if any(status is TestStatus.Running for status in statuses):
-            return TestStatus.Running
-        if any(status is TestStatus.Paused for status in statuses):
-            return TestStatus.Paused
-        if any(status is TestStatus.Idle for status in statuses):
-            return TestStatus.Idle
-        return TestStatus.Pending
+        with self.lock:
+            if not len(self):
+                return TestStatus.Idle
+            terminated_statuses = {TestStatus.Finished, TestStatus.Terminated}
+            statuses = [test.status for test in self.tests]
+            if all(status is TestStatus.Finished for status in statuses):
+                return TestStatus.Finished
+            if all(status in terminated_statuses for status in statuses):
+                return TestStatus.Terminated
+            if any(status is TestStatus.Running for status in statuses):
+                return TestStatus.Running
+            if any(status is TestStatus.Paused for status in statuses):
+                return TestStatus.Paused
+            if any(status is TestStatus.Idle for status in statuses):
+                return TestStatus.Idle
+            return TestStatus.Pending
 
     @computed_field
     @property
@@ -175,33 +183,69 @@ class Regression(TestBase):
         """Return ``True`` if ``test`` is tracked by this regression."""
         return test is not None and test.id in self.test_map
 
-    async def start(self, runner=None) -> None:
+    async def start(
+        self,
+        runner: Runner[Regression] | None = None,
+        manager: Manager[Regression] | None = None,
+    ) -> None:
         """Start or resume a regression."""
-        await default_regression_manager.start(self, runner=runner)
+        if manager is None:
+            from socx.regression.manager import default_regression_manager
 
-    async def pause(self) -> None:
+            manager = default_regression_manager
+        if runner is None:
+            from socx.regression.runners import default_regression_runner
+
+            runner = default_regression_runner
+        await manager.start(self, runner=runner)
+
+    async def pause(self, manager: Manager[Self] | None = None) -> None:
         """Pause a running regression and any active descendants."""
-        await default_regression_manager.pause(self)
+        if manager is None:
+            from socx.regression.manager import default_regression_manager
 
-    async def resume(self) -> None:
+            manager = cast(Manager[Self], default_regression_manager)
+        await manager.pause(self)
+
+    async def resume(self, manager: Manager[Self] | None = None) -> None:
         """Resume a paused regression and any active descendants."""
-        await default_regression_manager.resume(self)
+        if manager is None:
+            from socx.regression.manager import default_regression_manager
 
-    async def stop(self) -> None:
+            manager = cast(Manager[Self], default_regression_manager)
+        await manager.resume(self)
+
+    async def stop(self, manager: Manager[Self] | None = None) -> None:
         """Terminate active work within the regression."""
-        await default_regression_manager.stop(self)
+        if manager is None:
+            from socx.regression.manager import default_regression_manager
 
-    async def restart(self) -> None:
+            manager = cast(Manager[Self], default_regression_manager)
+        await manager.stop(self)
+
+    async def restart(self, manager: Manager[Self] | None = None) -> None:
         """Terminate, reset, and execute the regression again."""
-        await default_regression_manager.restart(self)
+        if manager is None:
+            from socx.regression.manager import default_regression_manager
 
-    def reset(self) -> None:
+            manager = cast(Manager[Self], default_regression_manager)
+        await manager.restart(self)
+
+    def reset(self, manager: Manager[Self] | None = None) -> None:
         """Reset the regression and all child tests."""
-        default_regression_manager.reset(self)
+        if manager is None:
+            from socx.regression.manager import default_regression_manager
 
-    def soft_reset(self) -> None:
+            manager = cast(Manager[Self], default_regression_manager)
+        manager.reset(self)
+
+    def soft_reset(self, manager: Manager[Self] | None = None) -> None:
         """Reset this regression unless it has already passed."""
-        default_regression_manager.soft_reset(self)
+        if manager is None:
+            from socx.regression.manager import default_regression_manager
+
+            manager = cast(Manager[Self], default_regression_manager)
+        manager.soft_reset(self)
 
     @classmethod
     async def desync[T](cls, it: Iterable[T]) -> AsyncGenerator[T]:
@@ -209,11 +253,16 @@ class Regression(TestBase):
             yield item
 
     async def _queue_tests(self) -> None:
-        items = [test for test in self.tests if not test.passed]
-        for test in items:
-            await self.pending.put(test)
-        for _ in range(self.run_limit):
-            await self.pending.put(None)
+        async with self.mutex:
+            items = [test for test in self.tests if not test.passed]
+            async with anyio.create_task_group() as tg:
+                for test in items:
+                    test._status = TestStatus.Pending
+                    tg.start_soon(self.pending.put, test)
+
+            async with anyio.create_task_group() as tg:
+                for _ in range(self.run_limit):
+                    tg.start_soon(self.pending.put, None)
 
     def assign_output_dir(self, output_dir: Path) -> Path:
         self.output_dir = output_dir
@@ -230,11 +279,17 @@ class Regression(TestBase):
 
         return output_dir
 
-    def dump_state(self, output_dir: Path | None = None) -> Path:
+    def dump_state(
+        self,
+        output_dir: Path | None = None,
+        manager: Manager[Self] | None = None,
+    ) -> Path:
         """Write the regression state and test artifacts to disk."""
-        return default_regression_manager.dump_state(
-            self, output_dir=output_dir
-        )
+        if manager is None:
+            from socx.regression.manager import default_regression_manager
+
+            manager = cast(Manager[Self], default_regression_manager)
+        return manager.dump_state(self, output_dir=output_dir)
 
     def _active_tests(self) -> list[TestBase]:
         return [test for test in self.tests if test.id in self._running]

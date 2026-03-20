@@ -59,9 +59,7 @@ class RegressionWidget(Widget, can_focus=False, inherit_bindings=True):
         self.regression_tree = VimTree("Regressions", id="regression-tree")
         self.details_view = RegressionDetails(id="regression-details")
         self.content = Container(
-            self.regression_tree,
-            self.details_view,
-            id="regression-content",
+            self.regression_tree, self.details_view, id="regression-content"
         )
         self.button_layout = Container(
             Button(
@@ -174,7 +172,9 @@ class RegressionWidget(Widget, can_focus=False, inherit_bindings=True):
 
         self.app.push_screen(
             RestartSelectionDialog(),
-            callback=lambda scope: self._on_restart_scope_selected(model, scope),
+            callback=lambda scope: self._on_restart_scope_selected(
+                model, scope
+            ),
         )
 
     @on(VimTree.OpenCursorNode)
@@ -200,7 +200,6 @@ class RegressionWidget(Widget, can_focus=False, inherit_bindings=True):
                 self.app.call_next(self.action_resume_selected)
             case "restart-button":
                 self.app.call_next(self.action_prompt_restart_selected)
-
 
     def _on_restart_scope_selected(
         self, model: Regression, scope: str | None
@@ -242,33 +241,37 @@ class RegressionWidget(Widget, can_focus=False, inherit_bindings=True):
         self._refresh_tree_state()
 
     @work(exclusive=False)
-    async def _restart_model(self, model: TestBase) -> None:
-        await model.restart()
+    async def _restart_model(self, model: TestBase, scope: str) -> None:
+        await self._restart_regression_by_scope(model, scope)
         self._refresh_tree_state()
 
-
     async def _restart_regression_by_scope(
-        self, regression: Regression, scope: str
+        self, model: TestBase, scope: str
     ) -> None:
+        def selector(t: TestBase, scope: str) -> bool:
+            match scope:
+                case "all":
+                    return True
+                case "failed_or_cancelled" | "cancelled" | "failed":
+                    return t.failed
+                case _:
+                    return False
+
         if scope == "all":
-            await regression.restart()
+            if model.is_running():
+                await model.stop()
+            model.reset()
             return
 
-        if scope == "failed_or_cancelled":
-            selector = lambda t: t.failed or t.terminated
-        elif scope == "cancelled":
-            selector = lambda t: t.terminated
-        elif scope == "failed":
-            selector = lambda t: t.finished and t.result is TestResult.Failed
-        else:
-            selector = lambda t: False
+        if isinstance(model, Regression):
+            for test in model.iter_leaf_tests():
+                if selector(test, scope):
+                    test.soft_reset()
 
-        for test in regression.iter_leaf_tests():
-            if selector(test):
-                test.soft_reset()
-
-        regression.soft_reset()
-        await regression.start()
+        if selector(model, scope):
+            if model.is_running():
+                await model.stop()
+            model.soft_reset()
 
     async def load_regression_from_path(self, path: Path) -> Regression:
         """Load regressions or saved state from ``path`` into the tree."""
@@ -477,8 +480,8 @@ class RegressionWidget(Widget, can_focus=False, inherit_bindings=True):
         )
 
     def _format_test_status_label(self, test: TestBase) -> Text:
-        status = f"💡 {self.details_view.format_status(test.status)}"
-        result = f"🚩 {self.details_view.format_result(test.result)}"
+        status = f"💡 {self.details_view.details.format_status(test.status)}"
+        result = f"🚩 {self.details_view.details.format_result(test.result)}"
         return Text.assemble("[", "|".join([status, result]), "]")
 
     def _no_model_selected_notification(self) -> None:

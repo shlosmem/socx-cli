@@ -36,10 +36,11 @@ __all__ = (
     "APP_TEMPLATES_DIR",
     "APP_CONFIG_FILE",
     "APP_CONFIG_FILENAME",
+    "Runner",
     "Encoder",
+    "Manager",
     "Serializer",
     "wrap",
-    "desync",
     "deduplicate",
     # I/O
     "DEFAULT_LEVEL",
@@ -170,10 +171,11 @@ from socx.core import APP_CONFIG_DIR as APP_CONFIG_DIR
 from socx.core import APP_TEMPLATES_DIR as APP_TEMPLATES_DIR
 from socx.core import APP_CONFIG_FILE as APP_CONFIG_FILE
 from socx.core import APP_CONFIG_FILENAME as APP_CONFIG_FILENAME
+from socx.core import Runner as Runner
 from socx.core import Encoder as Encoder
+from socx.core import Manager as Manager
 from socx.core import Serializer as Serializer
 from socx.core import wrap as wrap
-from socx.core import desync as desync
 from socx.core import deduplicate as deduplicate
 
 from socx.utils import join_decorators as join_decorators

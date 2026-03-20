@@ -1,29 +1,65 @@
 Screen {
-    height: auto;
-    min-height: 60vh;
+    min-height: 80vh;
     max_height: 80vh;
-    padding: 0 0;
-    margin: 0 0;
+    margin: 0 0 0 0;
+    padding: 0 0 0 0;
 }
 
 RegressionWidget {
-  align: center middle;
-  width: 1fr;
-  height: 1fr;
-  layout: vertical;
-  background: $surface;
-  padding: 0;
-  margin: 0;
+    align: center middle;
+    content-align: center middle;
+    width: 1fr;
+    height: 1fr;
+    layout: vertical;
+    background: $surface;
+        padding: 0 0 0 0;
+    margin: 0 0 0 0;
+
+}
+
+RestartSelectionDialog {
+    Dialog {
+        width: 40%;
+        height: 30%;
+        border: round $primary;
+        background: $surface;
+        padding: 0 0 0 0 !important;
+        margin: 0 0 0 0 !important;
+    }
+
+    Static {
+        text-align: center;
+    }
+
+    Container {
+    }
+}
+
+
+ScrollableContainer, ModalScreen {
+    margin: 0;
+    padding: 0;
 }
 
 RegressionDetails {
-  align: center middle;
+    align: center middle;
+    content-align: center middle;
+    margin: 0;
+    padding: 0;
+
+    RegressionStaticDetails {
+        align: center middle;
+        content-align: center middle;
+    }
 }
 
-ActionDialog {
-  align: center middle;
+ModalScreen {
+    align: center middle;
+    content-align: center middle;
+}
 
-  Dialog {
+Dialog {
+    align: center middle;
     width: 80%;
     height: 80%;
     border: round $primary;
@@ -37,7 +73,6 @@ ActionDialog {
         background: $panel;
         background-tint: $panel;
     }
-  }
 }
 
 #regression-content {
@@ -93,15 +128,15 @@ Button:hover {
 Header {
     width: 100%;
     height: auto;
-    background: $panel;
     padding: 0;
     margin: 0;
+    background: $panel;
 }
 
 Footer {
     width: 100%;
     height: auto;
-    background: $panel;
     padding: 0;
     margin: 0;
+    background: $panel;
 }

@@ -6,7 +6,7 @@ import rich.repr
 from socx import Test
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
-from textual.containers import Vertical
+from textual.containers import Container, Vertical
 from textual.screen import ModalScreen, ScreenResultType
 from textual.widgets import Static, TextArea
 from textual.widgets import Button
@@ -23,7 +23,7 @@ class Dialog(Vertical):
 class ReadOnlyOutputArea(TextArea, can_focus=True, inherit_bindings=True):
     """Read-only output viewer with keyboard navigation."""
 
-    BINDINGS: ClassVar[list[BindingType]] = TextArea.BINDINGS + VimModes.Normal
+    BINDINGS: ClassVar[list[Binding]] = TextArea.BINDINGS + VimModes.Normal
 
 
 @rich.repr.auto
@@ -46,6 +46,8 @@ class TestOutputDialog(ModalScreen[ScreenResultType]):
     DEFAULT_CSS: ClassVar[str] = """
     TestOutputDialog {
         align: center middle;
+        content-align: center middle;
+        text-align: center middle;
     }
 
     #regression-output-dialog {
@@ -116,16 +118,26 @@ class RestartSelectionDialog(ModalScreen[str | None]):
     }
 
     #restart-selection-dialog {
-        width: 72;
-        height: auto;
+        width: 50%;
+        height: 70%;
         border: thick $accent;
         background: $surface;
-        padding: 1 2;
+    }
+
+    #restart-selection-title {
+        padding: 0 1;
+        height: auto;
+        text-style: bold;
     }
 
     #restart-selection-actions {
+        width: 100%;
         height: auto;
-        layout: vertical;
+        layout: horizontal;
+        align: center bottom;
+        dock: bottom;
+        padding: 0 1 1 1;
+        margin: 1 0 0 0;
     }
     """
 
@@ -136,14 +148,19 @@ class RestartSelectionDialog(ModalScreen[str | None]):
 
     def compose(self) -> ComposeResult:
         with Dialog(id="restart-selection-dialog"):
-            yield Static("Restart scope", id="restart-selection-title")
-            with Vertical(id="restart-selection-actions"):
-                yield Button("All tests", id="restart-scope-all")
+            yield Static(
+                "Please choose your preferred restart option:",
+                id="restart-selection-title",
+            )
+            with Container(id="restart-selection-actions"):
                 yield Button(
-                    "Failing + cancelled", id="restart-scope-failed-cancelled"
+                    "Restart\nAll", variant="success", id="restart-scope-all"
                 )
-                yield Button("Only cancelled", id="restart-scope-cancelled")
-                yield Button("Only failing", id="restart-scope-failed")
+                yield Button(
+                    "Restart\nFailed & Terminated",
+                    variant="primary",
+                    id="restart-scope-failed-cancelled",
+                )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         button_id = event.button.id

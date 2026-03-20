@@ -131,12 +131,12 @@ class TestBase(BaseModel):
     @property
     def finished(self) -> bool:
         """Return ``True`` if the test completed and recorded a result."""
-        return self.status is TestStatus.Finished
+        return self.started and self.status is TestStatus.Finished
 
     @property
     def terminated(self) -> bool:
         """Return ``True`` if the test ended due to termination signals."""
-        return self.status is TestStatus.Terminated
+        return self.started and self.status is TestStatus.Terminated
 
     @property
     def passed(self) -> bool:
@@ -148,7 +148,7 @@ class TestBase(BaseModel):
         """Return ``True`` if the test finished with a failure result."""
         return (
             self.terminated or self.finished
-        ) and self.result == TestResult.Failed
+        ) and self.result is TestResult.Failed
 
     def accept(self, v: Visitor[TestBase]) -> None:
         """Accept a visit from a `Visitor`."""
@@ -214,17 +214,16 @@ class TestBase(BaseModel):
 
     def reset(self) -> None:
         """Reset runtime state so the test may be executed again."""
-        self.result = TestResult.NA
-        self.status = TestStatus.Idle
+        self._result = TestResult.NA
+        self._status = TestStatus.Idle
         self._process = None
         self._termination_requested = False
         self.started_time = None
         self.finished_time = None
 
-
     def soft_reset(self) -> None:
         """Reset this test unless it has already passed."""
-        if self.passed:
+        if not self.started or self.passed:
             return
         self.reset()
 
@@ -232,6 +231,11 @@ class TestBase(BaseModel):
         """Terminate, reset, and execute the test again."""
         await self.stop()
         self.reset()
+        await self.start()
+
+    async def soft_restart(self) -> None:
+        await self.stop()
+        self.soft_reset()
         await self.start()
 
     @_status.watch

@@ -21,7 +21,6 @@ __all__ = (
     "__directory__",
     # funcs
     "wrap",
-    "desync",
     "deduplicate",
     # paths
     "APP_ROOT_DIR",
@@ -45,8 +44,9 @@ __all__ = (
     "PROJECT_ROOT_DIR",
     "PROJECT_ROOT_CONFIG",
     # encoder
+    "Runner",
     "Encoder",
-    # serializer
+    "Manager",
     "Serializer",
 )
 
@@ -71,7 +71,6 @@ from socx.core.metadata import __appname__ as __appname__
 from socx.core.metadata import __directory__ as __directory__
 
 from socx.core.funcs import wrap as wrap
-from socx.core.funcs import desync as desync
 from socx.core.funcs import deduplicate as deduplicate
 
 from socx.core.paths import USER_LOG_DIR as USER_LOG_DIR
@@ -95,6 +94,7 @@ from socx.core.paths import APP_TEMPLATES_DIR as APP_TEMPLATES_DIR
 from socx.core.paths import APP_CONFIG_FILE as APP_CONFIG_FILE
 from socx.core.paths import APP_CONFIG_FILENAME as APP_CONFIG_FILENAME
 
+from socx.core.runner import Runner as Runner
 from socx.core.encoder import Encoder as Encoder
-
+from socx.core.manager import Manager as Manager
 from socx.core.serializer import Serializer as Serializer

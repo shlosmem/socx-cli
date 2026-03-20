@@ -3,22 +3,19 @@
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 import box
-from pydantic import UUID4
+from pydantic import TypeAdapter
 
+from socx.core import Serializer
 from socx.config import settings
-from socx.core.schema import FilePath
+from socx.core.schema import FilePath, DirectoryPath
+from socx.regression._utils import _safe_dir_name
 from socx.regression.test import Test, TestBase, TestResult, TestStatus
-
-
-def _safe_dir_name(name: str, node_id: UUID4) -> str:
-    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-").lower()
-    return f"{slug or 'item'}-{node_id}"
+from socx.regression.regression import Regression
 
 
 def _coerce_status(value: TestStatus | int | str) -> TestStatus:
@@ -35,29 +32,31 @@ def _coerce_result(value: TestResult | str) -> TestResult:
     return TestResult(value)
 
 
-class RegressionSerializer:
+class RegressionSerializer(Serializer[Regression]):
     def read_data(self, path: str | Path) -> Mapping[str, Any]:
         raise NotImplementedError
 
     def from_file(
         self,
-        cls,
+        cls: type[Regression],
         path: str | Path,
         name: str | None = None,
         test_cls: type[TestBase] | None = None,
-    ):
+    ) -> Regression:
         raise NotImplementedError
 
     def load(
         self,
-        cls,
+        cls: type[Regression],
         path: str | Path,
         name: str | None = None,
         test_cls: type[TestBase] | None = None,
-    ):
+    ) -> Regression:
         raise NotImplementedError
 
-    def dump_state(self, regression, output_dir: Path | None = None) -> Path:
+    def dump_state(
+        self, obj: Regression, output_dir: Path | None = None
+    ) -> Path:
         raise NotImplementedError
 
 
@@ -71,7 +70,7 @@ class YamlRegressionSerializer(RegressionSerializer):
     ):
         from box import Box
 
-        path = Path(FilePath(path))
+        path = TypeAdapter(FilePath).validate_python(path)
         name = name or path.stem
         node_cls = test_cls or Test
         data = self.read_data(path)
@@ -86,7 +85,7 @@ class YamlRegressionSerializer(RegressionSerializer):
         name: str | None = None,
         test_cls: type[TestBase] | None = None,
     ):
-        path = Path(FilePath(path))
+        path = TypeAdapter(FilePath).validate_python(path)
         data = self.read_data(path)
 
         if self._looks_like_state(data):
@@ -99,23 +98,30 @@ class YamlRegressionSerializer(RegressionSerializer):
 
         return self.from_file(cls, path, name=name, test_cls=test_cls)
 
-    def dump_state(self, regression, output_dir: Path | None = None) -> Path:
-        root_output_dir = regression.output_dir
+    def dump_state(
+        self,
+        obj: Regression,
+        output_dir: DirectoryPath | None = None,
+    ) -> Path:
+        root_output_dir = obj.output_dir
         if output_dir is not None:
-            root_output_dir = regression.assign_output_dir(
-                output_dir / regression.name
-            )
+            root_output_dir = obj.assign_output_dir(output_dir / obj.name)
 
         if root_output_dir is None:
             msg = "Regression output directory is not configured."
             raise ValueError(msg)
 
-        regression._persist_test_outputs()
+        obj._persist_test_outputs()
         file = root_output_dir / "state.yaml"
-        state = self._serialize_node(regression, root_output_dir)
+        state = self._serialize_node(obj, root_output_dir)
         file.parent.mkdir(parents=True, exist_ok=True)
         box.DDBox(state).to_yaml(str(file))
         return file
+
+    def serialize(
+        self, obj: TestBase, *args: Any, **kwargs: Any
+    ) -> dict[str, Any]:
+        return json.loads(obj.model_dump_json(serialize_as_any=True))
 
     def read_data(self, path: str | Path) -> Mapping[str, Any]:
         from box import Box
@@ -182,9 +188,7 @@ class YamlRegressionSerializer(RegressionSerializer):
     ) -> dict[str, Any]:
         from socx.regression.regression import Regression
 
-        state = json.loads(
-            node.model_dump_json(serialize_as_any=True)
-        )
+        state = self.serialize(node)
 
         if node.output_dir is not None and node.output_dir != root_output_dir:
             state["output_dir"] = str(
@@ -283,9 +287,22 @@ class YamlRegressionSerializer(RegressionSerializer):
         root_output_dir: Path,
         parent_output_dir: Path | None,
     ) -> Path:
+        # Ensure we are working with normalized absolute paths
+        root_output_dir = root_output_dir.resolve()
         relative_output_dir = data.get("output_dir")
         if relative_output_dir:
-            return root_output_dir / str(relative_output_dir)
+            # Join and normalize the path, then verify it is within
+            # root_output_dir
+            candidate = (root_output_dir / str(relative_output_dir)).resolve()
+            try:
+                candidate.relative_to(root_output_dir)
+            except ValueError as exc:
+                msg = (
+                    "Invalid output_dir in state file: must be within "
+                    "root_output_dir"
+                )
+                raise ValueError(msg) from exc
+            return candidate
         if parent_output_dir is None:
             return root_output_dir
         return parent_output_dir / _safe_dir_name(data["name"], data["id"])

@@ -3,20 +3,17 @@
 from __future__ import annotations
 
 from types import ModuleType
-from typing import Any, override
+from typing import Any
 
 from pydantic_core import to_jsonable_python
 from dynaconf import LazySettings
 from dynaconf.utils.boxing import DynaBox
 
-from socx.core.serializer import Serializer
 
-
-class ModuleSerializer(Serializer[ModuleType]):
+class ModuleSerializer:
     """Serialize module globals into a Dynaconf-ready mapping."""
 
     @classmethod
-    @override
     def serialize(
         cls, obj: ModuleType, *args: Any, **kwargs: Any
     ) -> dict[str, Any]:
@@ -27,9 +24,8 @@ class ModuleSerializer(Serializer[ModuleType]):
         return {name: attrs}
 
 
-class SettingsSerializer(Serializer[LazySettings]):
+class SettingsSerializer:
     @classmethod
-    @override
     def serialize(
         cls,
         obj: LazySettings,
